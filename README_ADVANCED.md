@@ -39,7 +39,7 @@ foc-devnet init [OPTIONS]
 - `--lotus <SOURCE>` - Lotus source location
 - `--filecoin-services <SOURCE>` - Filecoin Services source location
 - `--pdp <SOURCE>` - PDP source location. If omitted, uses the PDP submodule bundled with Filecoin Services.
-- `--proof-params-dir <PATH>` - Local proof params directory
+- `--proof-params-dir <PATH>` - Local proof params directory to copy into the global cache at `/var/tmp/filecoin-proof-parameters`
 - `--rand` - Use random mnemonic instead of deterministic one. Use this for unique test scenarios.
 
 **Source Format:**
@@ -359,6 +359,15 @@ $FOC_DEVNET_BASEDIR/
 └── tmp/
 ```
 
+Filecoin proof parameters are not stored under `FOC_DEVNET_BASEDIR`. They use the standard global host cache at `/var/tmp/filecoin-proof-parameters`, which is bind-mounted into Lotus, lotus-miner, and Curio containers at the same path.
+
+To reuse parameters from an older foc-devnet-private cache, copy them manually before starting:
+
+```bash
+mkdir -p /var/tmp/filecoin-proof-parameters
+cp -R ~/.foc-devnet/docker/volumes/cache/filecoin-proof-parameters/. /var/tmp/filecoin-proof-parameters/
+```
+
 ---
 
 ## Directory Structure
@@ -374,8 +383,7 @@ $FOC_DEVNET_BASEDIR/
 │   └── multicall3/                  # Multicall3 contracts
 ├── docker/
 │   └── volumes/
-│       ├── cache/                   # Shared cache (proof params, etc.)
-│       │   └── filecoin-proof-parameters/
+│       ├── cache/                   # Shared foc-devnet build/cache data
 │       └── run-specific/            # Run-isolated volumes
 │           └── <run-id>/            # Each run has its own volumes
 │               ├── lotus-data/      # Lotus blockchain data
