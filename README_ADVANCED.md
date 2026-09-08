@@ -141,6 +141,24 @@ Displays:
 - Network information
 - Port allocations
 
+### `logs`
+Shows combined Docker logs for the current foc-devnet run.
+
+```bash
+foc-devnet logs [OPTIONS]
+```
+
+**Options:**
+- `--follow`, `-f` - Follow logs from all current-run containers
+- `--tail <LINES>` - Number of recent lines to show per container before following (default: 100, only valid with `--follow`)
+
+**Examples:**
+```bash
+foc-devnet logs              # Print all current-run container logs in timestamp order
+foc-devnet logs --follow     # Tail combined logs from all current-run containers
+foc-devnet logs -f --tail 50 # Tail logs, starting with 50 recent lines per container
+```
+
 ### `version`
 Shows version information.
 
@@ -1148,10 +1166,8 @@ docker ps | grep curio
 docker network ls | grep cur-m-net
 # Should see: foc-<run-id>-cur-m-net-{1,2,3,4,5}
 
-# Monitor logs
-docker logs -f foc-<run-id>-curio-1
-docker logs -f foc-<run-id>-curio-2
-# ... etc
+# Monitor combined logs
+foc-devnet logs --follow
 ```
 
 ### Querying SP Status
@@ -1160,8 +1176,8 @@ docker logs -f foc-<run-id>-curio-2
 # List all containers
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-# Check specific SP logs
-docker logs foc-<run-id>-curio-2
+# Print combined logs in timestamp order
+foc-devnet logs
 
 # Query provider IDs
 cat ~/.foc-devnet/state/latest/pdp_sps/*.provider_id.json
@@ -1207,7 +1223,7 @@ vim ~/.foc-devnet/config.toml
 ### Container won't start
 ```bash
 # Check logs
-docker logs foc-<run-id>-lotus
+foc-devnet logs
 
 # Check if image exists
 docker images | grep foc-lotus

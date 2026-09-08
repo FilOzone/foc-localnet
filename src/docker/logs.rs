@@ -25,7 +25,7 @@ pub struct ContainerInfo {
 }
 
 /// List all containers (running or stopped) with name, image, and status.
-fn list_all_containers() -> Result<Vec<ContainerInfo>, Box<dyn Error>> {
+pub(crate) fn list_all_containers() -> Result<Vec<ContainerInfo>, Box<dyn Error>> {
     let output = docker_command(&["ps", "-a", "--format", "{{.Names}}|{{.Image}}|{{.Status}}"])?;
     let stdout = String::from_utf8_lossy(&output.stdout);
 

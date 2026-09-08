@@ -81,12 +81,84 @@ pub enum Commands {
     },
     /// Show status of the foc-devnet system
     Status,
+    /// Show combined logs for the current foc-devnet run
+    Logs {
+        /// Follow logs from all current-run containers
+        #[arg(short, long)]
+        follow: bool,
+        /// Number of recent lines to show per container before following
+        #[arg(long, value_name = "LINES", requires = "follow")]
+        tail: Option<usize>,
+    },
     /// Show version information
     Version {
         /// Force plain output without tracing prefixes, even when stdout is a terminal
         #[arg(long)]
         notty: bool,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_parse_logs_default() {
+        let cli = Cli::try_parse_from(["foc-devnet", "logs"]).unwrap();
+
+        match cli.command {
+            Commands::Logs { follow, tail } => {
+                assert!(!follow);
+                assert_eq!(tail, None);
+            }
+            _ => panic!("expected logs command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_logs_follow_long() {
+        let cli = Cli::try_parse_from(["foc-devnet", "logs", "--follow"]).unwrap();
+
+        match cli.command {
+            Commands::Logs { follow, tail } => {
+                assert!(follow);
+                assert_eq!(tail, None);
+            }
+            _ => panic!("expected logs command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_logs_follow_short() {
+        let cli = Cli::try_parse_from(["foc-devnet", "logs", "-f"]).unwrap();
+
+        match cli.command {
+            Commands::Logs { follow, tail } => {
+                assert!(follow);
+                assert_eq!(tail, None);
+            }
+            _ => panic!("expected logs command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_logs_follow_tail() {
+        let cli = Cli::try_parse_from(["foc-devnet", "logs", "--follow", "--tail", "50"]).unwrap();
+
+        match cli.command {
+            Commands::Logs { follow, tail } => {
+                assert!(follow);
+                assert_eq!(tail, Some(50));
+            }
+            _ => panic!("expected logs command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_logs_tail_requires_follow() {
+        assert!(Cli::try_parse_from(["foc-devnet", "logs", "--tail", "50"]).is_err());
+    }
 }
 
 /// Build subcommands

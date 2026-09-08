@@ -46,6 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             main_app::command_handlers::handle_build(build_command)
         }
         Commands::Status => main_app::command_handlers::handle_status(),
+        Commands::Logs { follow, tail } => main_app::command_handlers::handle_logs(follow, tail),
         Commands::Version { notty } => main_app::version::handle_version(notty),
     };
 

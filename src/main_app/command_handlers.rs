@@ -82,3 +82,9 @@ pub fn handle_status() -> Result<(), Box<dyn std::error::Error>> {
     // Status is read-only, no poison protection needed
     commands::status()
 }
+
+/// Execute the logs command
+pub fn handle_logs(follow: bool, tail: Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
+    // Logs is read-only, no poison protection needed
+    commands::logs(follow, tail)
+}
