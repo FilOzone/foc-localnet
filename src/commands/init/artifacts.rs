@@ -29,7 +29,7 @@ pub fn stage_artifacts(proof_params_dir: Option<String>) -> Result<(), Box<dyn s
     Ok(())
 }
 
-/// Copy filecoin-proof-params from a local directory.
+/// Copy filecoin-proof-params from a local directory into the global cache.
 ///
 /// This function copies proof parameters from a local directory instead of downloading them.
 ///
@@ -57,6 +57,14 @@ fn copy_proof_params_from_local(params_path: &str) -> Result<(), Box<dyn std::er
 
     // Create destination directory
     fs::create_dir_all(&dest_path)?;
+
+    if params_path.canonicalize()? == dest_path.canonicalize()? {
+        info!(
+            "Proof parameters already use the global cache: {}",
+            dest_path.display()
+        );
+        return Ok(());
+    }
 
     // Copy all files from source to destination
     let pb = ProgressBar::new_spinner();

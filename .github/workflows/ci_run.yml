@@ -286,12 +286,12 @@ jobs:
     # Download and extract Filecoin proof parameters from S3
     - name: "EXEC: {Download proof parameters from S3}, independent"
       run: |
-        mkdir -p ~/.foc-devnet/docker/volumes/cache/filecoin-proof-parameters/
+        mkdir -p /var/tmp/filecoin-proof-parameters/
         curl -L https://fil-proof-params-2k-cache.s3.us-east-2.amazonaws.com/filecoin-proof-params-2k.tar -o /tmp/filecoin-proof-params-2k.tar
-        tar -xf /tmp/filecoin-proof-params-2k.tar -C ~/.foc-devnet/docker/volumes/cache/filecoin-proof-parameters/
+        tar -xf /tmp/filecoin-proof-params-2k.tar -C /var/tmp/filecoin-proof-parameters/
         rm /tmp/filecoin-proof-params-2k.tar
-        ls -lath ~/.foc-devnet/docker/volumes/cache/filecoin-proof-parameters/
-        PROOF_PARAMS_HASH=$(find ~/.foc-devnet/docker/volumes/cache/filecoin-proof-parameters -type f -exec sha256sum {} \; | cut -d' ' -f1 | sort | sha256sum | cut -d' ' -f1)
+        ls -lath /var/tmp/filecoin-proof-parameters/
+        PROOF_PARAMS_HASH=$(find /var/tmp/filecoin-proof-parameters -type f -exec sha256sum {} \; | cut -d' ' -f1 | sort | sha256sum | cut -d' ' -f1)
         echo "Downloaded proof parameters with hash: $PROOF_PARAMS_HASH"
 
     # Verify cluster is running correctly

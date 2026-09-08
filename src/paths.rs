@@ -169,10 +169,13 @@ pub fn foc_devnet_config() -> PathBuf {
     foc_devnet_home().join("config.toml")
 }
 
-/// Returns the path to the Filecoin proof parameters directory
-/// e.g., ~/.foc-devnet/docker/volumes/cache/filecoin-proof-parameters
+/// Host path where Filecoin proof parameters are cached globally.
+pub const HOST_FILECOIN_PROOF_PARAMS_PATH: &str = "/var/tmp/filecoin-proof-parameters";
+
+/// Returns the path to the global Filecoin proof parameters directory
+/// e.g., /var/tmp/filecoin-proof-parameters
 pub fn foc_devnet_proof_parameters() -> PathBuf {
-    foc_devnet_docker_volumes_cache().join("filecoin-proof-parameters")
+    PathBuf::from(HOST_FILECOIN_PROOF_PARAMS_PATH)
 }
 
 /// Returns the path to store BLS keys for lotus
@@ -367,5 +370,24 @@ mod tests {
 
         assert!(foc_devnet_bin().starts_with("/tmp/test-foc"));
         assert_eq!(foc_devnet_bin(), PathBuf::from("/tmp/test-foc/bin"));
+    }
+
+    #[test]
+    fn test_proof_parameters_use_global_cache_path() {
+        assert_eq!(
+            foc_devnet_proof_parameters(),
+            PathBuf::from(HOST_FILECOIN_PROOF_PARAMS_PATH)
+        );
+    }
+
+    #[test]
+    fn test_proof_parameters_ignore_custom_basedir() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _guard = EnvGuard::new("FOC_DEVNET_BASEDIR", Some("/tmp/test-foc"));
+
+        assert_eq!(
+            foc_devnet_proof_parameters(),
+            PathBuf::from("/var/tmp/filecoin-proof-parameters")
+        );
     }
 }

@@ -10,8 +10,12 @@ use crate::paths::{
 use crate::utils::retry::{retry_with_fixed_delay, DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY_SECS};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::fs;
+use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
@@ -22,13 +26,13 @@ const PROOF_PARAMS_S3_URL: &str =
 
 /// Ensure Filecoin proof parameters are downloaded.
 ///
-/// Parameters are downloaded once and cached in ~/.foc-devnet/artifacts/filecoin-proof-parameters/
+/// Parameters are downloaded once and cached in /var/tmp/filecoin-proof-parameters/
 /// This directory is mounted into lotus containers at /var/tmp/filecoin-proof-parameters/
 pub fn ensure_proof_parameters() -> Result<(), Box<dyn std::error::Error>> {
     let params_dir = foc_devnet_proof_parameters();
 
     // Check if parameters already exist
-    if params_dir.exists() && params_dir.read_dir()?.next().is_some() {
+    if dir_has_entries(&params_dir)? {
         info!(
             "✓ Proof parameters already exist at: {}",
             params_dir.display()
@@ -36,10 +40,7 @@ pub fn ensure_proof_parameters() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    info!(
-        "Proof parameters directory does not exist: {}",
-        params_dir.display()
-    );
+    info!("Proof parameters not found at: {}", params_dir.display());
 
     info!("⬇ Downloading proof parameters (this may take a while)...");
 
@@ -68,14 +69,12 @@ pub fn ensure_proof_parameters() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// This is the primary download method that uses the lotus binary's
 /// built-in parameter fetching functionality.
-fn download_via_lotus_fetch_params(
-    params_dir: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn download_via_lotus_fetch_params(params_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // Retry the download operation in case of network issues
     retry_with_fixed_delay(
         || {
-            // Ensure directory exists for each attempt (in case cleanup removed it)
-            fs::create_dir_all(params_dir)?;
+            let staging_dir = proof_params_staging_dir("foc-proof-params-fetch-", params_dir)?;
+            let staging_path = staging_dir.path().to_path_buf();
 
             // Run lotus fetch-params in builder container
             let bin_dir = foc_devnet_bin();
@@ -89,22 +88,19 @@ fn download_via_lotus_fetch_params(
                     .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ "),
             );
 
-            let bytes_downloaded = Arc::new(Mutex::new(0u64));
             let start_time = Instant::now();
-            let bytes_clone = Arc::clone(&bytes_downloaded);
-            let params_dir_clone = params_dir.to_path_buf();
+            let staging_path_for_progress = staging_path.clone();
+            let stop_progress = Arc::new(AtomicBool::new(false));
+            let stop_progress_clone = Arc::clone(&stop_progress);
 
             // Spawn a thread to update progress by monitoring directory size
             let pb_clone = pb.clone();
             let update_handle = thread::spawn(move || {
-                loop {
+                while !stop_progress_clone.load(Ordering::Relaxed) {
                     thread::sleep(Duration::from_millis(500));
 
                     // Calculate directory size
-                    if let Ok(size) = get_dir_size(&params_dir_clone) {
-                        let mut total = bytes_clone.lock().unwrap();
-                        *total = size;
-
+                    if let Ok(size) = get_dir_size(&staging_path_for_progress) {
                         let elapsed = start_time.elapsed().as_secs_f64();
                         if elapsed > 0.0 {
                             let speed_mbps = (size as f64 / 1_048_576.0) / elapsed;
@@ -116,11 +112,7 @@ fn download_via_lotus_fetch_params(
                         }
                     }
 
-                    if !pb_clone.is_finished() {
-                        pb_clone.tick();
-                    } else {
-                        break;
-                    }
+                    pb_clone.tick();
                 }
             });
 
@@ -143,7 +135,7 @@ fn download_via_lotus_fetch_params(
             push_bind_mount(&mut docker_args, &bin_dir, "/output")?;
             push_bind_mount(
                 &mut docker_args,
-                params_dir,
+                &staging_path,
                 CONTAINER_FILECOIN_PROOF_PARAMS_PATH,
             )?;
             docker_args.extend([
@@ -155,33 +147,48 @@ fn download_via_lotus_fetch_params(
                     super::constants::PROOF_PARAMS_SECTOR_SIZE
                 ),
             ]);
-            let child = Command::new("docker")
+            let child = match Command::new("docker")
                 .args(&docker_args)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .spawn()?;
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(error) => {
+                    stop_progress.store(true, Ordering::Relaxed);
+                    pb.finish_and_clear();
+                    let _ = update_handle.join();
+                    return Err(error.into());
+                }
+            };
 
-            let output = child.wait_with_output()?;
+            let output = match child.wait_with_output() {
+                Ok(output) => output,
+                Err(error) => {
+                    stop_progress.store(true, Ordering::Relaxed);
+                    pb.finish_and_clear();
+                    let _ = update_handle.join();
+                    return Err(error.into());
+                }
+            };
 
+            stop_progress.store(true, Ordering::Relaxed);
             pb.finish_and_clear();
-            drop(update_handle);
+            let _ = update_handle.join();
 
             if !output.status.success() {
-                // Clean up partial download on failure
-                if params_dir.exists() {
-                    if let Err(cleanup_err) = fs::remove_dir_all(params_dir) {
-                        warn!(
-                            "Failed to clean up partial proof parameters download: {}",
-                            cleanup_err
-                        );
-                    }
-                }
                 return Err(format!(
                     "Failed to download proof parameters: {}",
                     String::from_utf8_lossy(&output.stderr)
                 )
                 .into());
             }
+
+            if !dir_has_entries(&staging_path)? {
+                return Err("lotus fetch-params produced no files".into());
+            }
+
+            merge_dir_contents(&staging_path, params_dir)?;
 
             Ok(())
         },
@@ -195,11 +202,11 @@ fn download_via_lotus_fetch_params(
 ///
 /// This method downloads a pre-packaged tarball of proof parameters from S3,
 /// extracts it, and places the files in the correct location.
-fn download_from_s3(params_dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    let tarball_path = std::env::temp_dir().join("filecoin-proof-params-2k.tar");
-
-    // Ensure params directory exists
-    fs::create_dir_all(params_dir)?;
+fn download_from_s3(params_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let staging_dir = proof_params_staging_dir("foc-proof-params-s3-", params_dir)?;
+    let tarball_path = staging_dir.path().join("filecoin-proof-params-2k.tar");
+    let extract_dir = staging_dir.path().join("extracted");
+    fs::create_dir_all(&extract_dir)?;
 
     // Download tarball with retry
     retry_with_fixed_delay(
@@ -252,16 +259,12 @@ fn download_from_s3(params_dir: &std::path::Path) -> Result<(), Box<dyn std::err
             "-xf",
             &tarball_path.to_string_lossy(),
             "-C",
-            &params_dir.to_string_lossy(),
+            &extract_dir.to_string_lossy(),
         ])
         .output()?;
 
     if !extract_output.status.success() {
-        // Clean up on extraction failure
         let _ = fs::remove_file(&tarball_path);
-        if params_dir.exists() {
-            let _ = fs::remove_dir_all(params_dir);
-        }
         return Err(format!(
             "Failed to extract tarball: {}",
             String::from_utf8_lossy(&extract_output.stderr)
@@ -275,9 +278,11 @@ fn download_from_s3(params_dir: &std::path::Path) -> Result<(), Box<dyn std::err
     }
 
     // Verify extraction succeeded by checking for files
-    if !params_dir.exists() || params_dir.read_dir()?.next().is_none() {
+    if !dir_has_entries(&extract_dir)? {
         return Err("Tarball extraction produced no files".into());
     }
+
+    merge_dir_contents(&extract_dir, params_dir)?;
 
     info!("Proof parameters extracted successfully");
     Ok(())
@@ -301,4 +306,106 @@ fn get_dir_size(path: &std::path::Path) -> std::io::Result<u64> {
     }
 
     Ok(total_size)
+}
+
+fn dir_has_entries(path: &Path) -> std::io::Result<bool> {
+    Ok(path.is_dir() && path.read_dir()?.next().is_some())
+}
+
+fn proof_params_staging_dir(
+    prefix: &str,
+    params_dir: &Path,
+) -> Result<tempfile::TempDir, Box<dyn std::error::Error>> {
+    let staging_parent = params_dir.parent().unwrap_or_else(|| Path::new("/var/tmp"));
+    fs::create_dir_all(staging_parent)?;
+
+    Ok(tempfile::Builder::new()
+        .prefix(prefix)
+        .tempdir_in(staging_parent)?)
+}
+
+fn merge_dir_contents(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    fs::create_dir_all(dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        let dest_path = dst.join(entry.file_name());
+
+        if path.is_dir() {
+            merge_dir_contents(&path, &dest_path)?;
+            continue;
+        }
+
+        if dest_path.exists() {
+            warn!(
+                "Proof parameter file already exists, keeping existing file: {}",
+                dest_path.display()
+            );
+            continue;
+        }
+
+        match fs::rename(&path, &dest_path) {
+            Ok(()) => {}
+            Err(_) => {
+                fs::copy(&path, &dest_path)?;
+                fs::remove_file(&path)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{dir_has_entries, merge_dir_contents, proof_params_staging_dir};
+    use std::fs;
+
+    #[test]
+    fn dir_has_entries_is_false_for_missing_directory() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(!dir_has_entries(&root.path().join("missing")).unwrap());
+    }
+
+    #[test]
+    fn merge_dir_contents_keeps_existing_files() {
+        let root = tempfile::tempdir().unwrap();
+        let src = root.path().join("src");
+        let dst = root.path().join("dst");
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(src.join("param"), "new").unwrap();
+        fs::write(dst.join("param"), "existing").unwrap();
+
+        merge_dir_contents(&src, &dst).unwrap();
+
+        assert_eq!(fs::read_to_string(dst.join("param")).unwrap(), "existing");
+    }
+
+    #[test]
+    fn merge_dir_contents_copies_nested_files() {
+        let root = tempfile::tempdir().unwrap();
+        let src = root.path().join("src");
+        let dst = root.path().join("dst");
+        fs::create_dir_all(src.join("nested")).unwrap();
+        fs::write(src.join("nested").join("param"), "contents").unwrap();
+
+        merge_dir_contents(&src, &dst).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(dst.join("nested").join("param")).unwrap(),
+            "contents"
+        );
+    }
+
+    #[test]
+    fn proof_params_staging_dir_uses_params_parent() {
+        let root = tempfile::tempdir().unwrap();
+        let params_dir = root.path().join("filecoin-proof-parameters");
+
+        let staging_dir = proof_params_staging_dir("test-proof-params-", &params_dir).unwrap();
+
+        assert_eq!(staging_dir.path().parent().unwrap(), root.path());
+    }
 }
