@@ -1,5 +1,6 @@
 use crate::paths::foc_devnet_run_log_file;
 use std::fs;
+use std::io::IsTerminal;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 /// Initializes the logging system.
@@ -20,7 +21,7 @@ pub fn init_logging(run_id: &str) -> Result<(), Box<dyn std::error::Error>> {
     let file_layer = fmt::layer().with_ansi(false).with_writer(log_file);
 
     let stdout_layer = fmt::layer()
-        .with_ansi(true)
+        .with_ansi(std::io::stdout().is_terminal())
         .with_writer(std::io::stdout)
         .with_target(false)
         .with_file(true)

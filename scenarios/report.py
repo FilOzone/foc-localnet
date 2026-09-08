@@ -43,6 +43,24 @@ def get_version_info():
     return "foc-devnet version: not available"
 
 
+def get_status_info():
+    """Capture the current devnet status for inclusion in the report."""
+    for binary in ["./foc-devnet", "foc-devnet"]:
+        try:
+            result = subprocess.run(
+                [binary, "status"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            output = (result.stdout + result.stderr).strip()
+            if output:
+                return output
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    return "foc-devnet status: not available"
+
+
 _REPORT_TEMPLATE = Template("""
 # Scenarios Tests 
 
@@ -55,6 +73,11 @@ _REPORT_TEMPLATE = Template("""
 
 ## Versions info
 $version_info
+
+## Devnet status
+```
+$status_info
+```
 
 ## Resolved dependencies
 $dependency_table
@@ -101,12 +124,15 @@ def write_report(results: list[TestResult] | None = None, elapsed: int = 0):
     passed = sum(1 for r in results if r.is_passed)
     content = _REPORT_TEMPLATE.substitute(
         run_type=os.environ.get("SCENARIO_RUN_TYPE", "local"),
-        date=datetime.datetime.now(datetime.UTC).strftime("%d-%B-%Y %H:%M:%S GMT +0"),
+        date=datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%d-%B-%Y %H:%M:%S GMT +0"
+        ),
         pass_count=passed,
         fail_count=total - passed,
         total_count=total,
         ci_run_link=_build_ci_run_link(),
         version_info=f"```\n{get_version_info()}\n```",
+        status_info=get_status_info(),
         dependency_table=format_markdown_table(),
         test_summary=_build_test_summary(results),
     )

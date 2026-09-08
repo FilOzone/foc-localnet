@@ -446,6 +446,11 @@ jobs:
             ./foc-devnet version 2>&1 || echo "version command failed"
             echo '```'
             echo ""
+            echo "## Devnet status"
+            echo '```'
+            ./foc-devnet status 2>&1 || echo "status command failed"
+            echo '```'
+            echo ""
             echo "## Resolved dependencies"
             if [ -f "$CI_DEPENDENCY_METADATA" ]; then
               echo '```json'
@@ -455,6 +460,18 @@ jobs:
               echo "Dependency metadata is unavailable."
             fi
           } > "$REPORT"
+        fi
+
+    # Publish the scenario report into the GitHub Actions job summary so it is
+    # visible directly from the run's Summary view.
+    - name: "EXEC: {Publish scenario report to workflow summary}"
+      if: always()
+      run: |
+        REPORT="$HOME/.foc-devnet/state/latest/scenario_report.md"
+        if [ -f "$REPORT" ]; then
+          cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "No scenario report available for **${{ inputs.name }}** strategy." >> "$GITHUB_STEP_SUMMARY"
         fi
 
     # Upload scenario report as artifact (name includes run name to avoid collisions in matrix)
