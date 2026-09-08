@@ -247,6 +247,36 @@ class ScenarioDependencyTests(unittest.TestCase):
         sleep.assert_called_once_with(5)
         ok.assert_called_once_with("run smoke")
 
+    @patch("scenarios.synapse_runtime.time.sleep")
+    @patch("scenarios.synapse_runtime.ok")
+    @patch("scenarios.synapse_runtime.info")
+    @patch("scenarios.synapse_runtime.subprocess.run")
+    def test_run_node_script_retries_null_round_error(self, run, _info, ok, sleep):
+        run.side_effect = [
+            subprocess.CompletedProcess(
+                ["node", "smoke.ts"],
+                1,
+                stdout='Request body: {"method":"eth_getBlockByNumber"}',
+                stderr="Details: requested epoch was a null round (215)",
+            ),
+            subprocess.CompletedProcess(
+                ["node", "smoke.ts"], 0, stdout="done\n", stderr=""
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as directory:
+            work_dir = Path(directory)
+            (work_dir / "smoke.ts").touch()
+            run_node_script(
+                SynapseRuntime(work_dir, "npm", "npm:@filoz/synapse-sdk@1.1.1"),
+                "smoke.ts",
+                "run smoke",
+            )
+
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(5)
+        ok.assert_called_once_with("run smoke")
+
     @patch("scenarios.test_multi_copy_upload.run_cmd", return_value=True)
     @patch(
         "scenarios.test_multi_copy_upload.component",

@@ -20,6 +20,11 @@ on:
         description: 'Dependency profile declared in ci/dependency-profiles.json'
         required: true
         type: string
+      include_optional_scenarios:
+        description: 'Run optional extended scenarios after the core suite'
+        required: false
+        type: boolean
+        default: false
       enable_reporting:
         description: 'When true, file a GitHub issue with the scenario report'
         required: false
@@ -44,7 +49,7 @@ on:
 jobs:
   foc-start-test:
     runs-on: ["self-hosted", "linux", "x64", "4xlarge+disk"]
-    timeout-minutes: 100
+    timeout-minutes: 150
     permissions:
       contents: read
       issues: write
@@ -423,7 +428,12 @@ jobs:
         SKIP_REPORT_ON_PASS: ${{ inputs.skip_report_on_pass }}
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         SCENARIO_RUN_TYPE: ${{ inputs.name }}
-      run: python3 scenarios/run.py
+      run: |
+        if [[ "${{ inputs.include_optional_scenarios }}" == "true" ]]; then
+          python3 scenarios/run.py --include-optional
+        else
+          python3 scenarios/run.py
+        fi
 
     # Ensure scenario report exists even if tests didn't run (for issue reporting)
     - name: "EXEC: {Ensure scenario report exists}"

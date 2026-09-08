@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Scenario test runner — executes tests in order and generates a report.
 
-Run all tests:  python3 scenarios/run.py
-Run one test:   python3 scenarios/test_containers.py
+Run core tests:       python3 scenarios/run.py
+Run core + optional:  python3 scenarios/run.py --include-optional
+Run one test:         python3 scenarios/test_containers.py
 """
 
+import argparse
 import os
 import subprocess
 import sys
@@ -22,18 +24,34 @@ from scenarios.helpers import info
 from scenarios.report import TestResult, write_report
 
 # ── Scenario execution order ─────────────────────────────────
-# Each entry is (test_name, timeout_seconds)
+# Each entry is (test_name, timeout_seconds, optional). Optional scenarios are
+# discoverable and runnable directly, but omitted from the default core run.
 CREATE_DATASET_SMOKE_TIMEOUT_SECS = 1800
 
 ORDER = [
-    ("test_containers", 5),
-    ("test_basic_balances", 10),
+    ("test_containers", 5, False),
+    ("test_basic_balances", 10, False),
     # Allows setup plus five 280s Node attempts and retry delays.
-    ("test_create_dataset_smoke", CREATE_DATASET_SMOKE_TIMEOUT_SECS),
-    ("test_synapse_e2e", 600),
-    ("test_multi_copy_upload", 600),
-    ("test_caching_subsystem", 200),
+    ("test_create_dataset_smoke", CREATE_DATASET_SMOKE_TIMEOUT_SECS, False),
+    ("test_synapse_e2e", 600, False),
+    ("test_negative_permissions", 300, False),
+    ("test_multi_copy_upload", 600, False),
+    ("test_caching_subsystem", 200, False),
+    ("test_bulk_add", 600, True),
+    ("test_termination_controls", 900, True),
 ]
+
+
+def select_scenarios(include_optional, order=ORDER):
+    """Return (selected, skipped) entries for an ordered scenario collection."""
+    selected = []
+    skipped = []
+    for scenario in order:
+        if scenario[2] and not include_optional:
+            skipped.append(scenario)
+        else:
+            selected.append(scenario)
+    return selected, skipped
 
 
 def _run_single_test(scenario_py_file, name, timeout_sec):
@@ -75,13 +93,24 @@ def _run_single_test(scenario_py_file, name, timeout_sec):
     )
 
 
-def run_tests():
-    """Run scenarios in ORDER. Returns list of TestResult."""
+def run_tests(include_optional=False):
+    """Run selected scenarios in ORDER. Returns list of TestResult."""
     pwd = os.path.dirname(os.path.abspath(__file__))
+    selected, _ = select_scenarios(include_optional)
     return [
         _run_single_test(os.path.join(pwd, f"{name}.py"), name, timeout)
-        for name, timeout in ORDER
+        for name, timeout, _ in selected
     ]
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser(description="Run foc-devnet scenario tests")
+    parser.add_argument(
+        "--include-optional",
+        action="store_true",
+        help="run optional extended scenarios after the core scenarios",
+    )
+    return parser.parse_args()
 
 
 def _print_summary(results, elapsed):
@@ -116,10 +145,21 @@ def _print_ci_url():
 
 
 if __name__ == "__main__":
+    args = _parse_args()
+    _, skipped = select_scenarios(args.include_optional)
+    selection = "core + optional" if args.include_optional else "core"
+    info(f"Scenario selection: {selection}")
+    if skipped:
+        info(
+            "Skipping optional scenarios (use --include-optional): "
+            + ", ".join(name for name, _, _ in skipped)
+        )
     start = time.time()
-    results = run_tests()
+    results = run_tests(args.include_optional)
     elapsed = int(time.time() - start)
     _print_summary(results, elapsed)
-    print(f"Report: {write_report(results=results)}")
+    print(
+        f"Report: {write_report(results=results, selection=selection, skipped_tests=[name for name, _, _ in skipped])}"
+    )
     _print_ci_url()
     sys.exit(0 if all(r.is_passed for r in results) else 1)

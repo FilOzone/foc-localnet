@@ -1314,8 +1314,11 @@ Scenario tests are Python scripts that validate devnet state after startup. They
 ### Running scenarios
 
 ```bash
-# Run all scenarios
+# Run the core scenario suite
 python3 scenarios/run.py
+
+# Include extended optional scenarios
+python3 scenarios/run.py --include-optional
 
 # Run a single scenario directly
 python3 scenarios/test_basic_balances.py
@@ -1328,7 +1331,11 @@ Reports are written to `~/.foc-devnet/state/latest/scenario_report.md`.
 
 ### CI integration
 
-Scenarios run automatically in CI after the devnet starts. On nightly runs (or manual dispatch with `reporting` enabled), failures automatically create a GitHub issue with a full report.
+Scenarios run automatically in CI after the devnet starts. Pull requests run the
+core suite by default. Apply the `run-optional-scenarios` label to rerun the
+same pull-request CI with the extended scenarios included. On nightly runs (or
+manual dispatch with `reporting` enabled), failures automatically create a
+GitHub issue with a full report.
 
 CI resolves compatibility-sensitive dependencies from `ci/dependency-profiles.json`.
 Pull requests use the pinned `default` profile, while nightly `stability` runs use

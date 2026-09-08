@@ -14,7 +14,10 @@ from pathlib import Path
 from scenarios.dependencies import component
 from scenarios.helpers import fail, info, ok, run_cmd
 
-STATE_FORK_ERROR = "refusing explicit call due to state fork at epoch"
+TRANSIENT_CHAIN_ERRORS = (
+    "refusing explicit call due to state fork at epoch",
+    "requested epoch was a null round",
+)
 UPLOAD_RETRY_DELAYS_SECS = (5, 10, 15, 30)
 
 
@@ -153,7 +156,7 @@ def run_node_script(
     env: dict | None = None,
     timeout: int | None = None,
 ) -> None:
-    """Run a prepared scenario entrypoint with retries for transient state forks."""
+    """Run a prepared scenario entrypoint with retries for transient chain errors."""
     script = runtime.work_dir / script_name
     if not script.is_file():
         raise RuntimeError(f"Synapse scenario entrypoint not found: {script}")
@@ -179,12 +182,15 @@ def run_node_script(
                 info(details)
             ok(label)
             return
-        if STATE_FORK_ERROR not in details or attempt == max_attempts:
+        if (
+            not any(error in details for error in TRANSIENT_CHAIN_ERRORS)
+            or attempt == max_attempts
+        ):
             fail(f"{label} (exit={result.returncode}) {details}")
 
         delay = UPLOAD_RETRY_DELAYS_SECS[attempt - 1]
         info(
-            f"{label}: Lotus refused eth_call while crossing a state fork; "
+            f"{label}: Lotus returned a transient chain RPC error; "
             f"retrying in {delay}s (attempt {attempt}/{max_attempts})"
         )
         time.sleep(delay)

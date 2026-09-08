@@ -9,6 +9,7 @@ name: CI (Pull Request)
 
 on:
   pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
   push:
     branches: ['main']
 
@@ -59,5 +60,6 @@ jobs:
     with:
       name: default
       profile: default
+      include_optional_scenarios: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-optional-scenarios') }}
       enable_reporting: false
     secrets: inherit

@@ -59,6 +59,11 @@ $version_info
 ## Resolved dependencies
 $dependency_table
 
+## Scenario selection
+**$scenario_selection**
+
+$skipped_optional_tests
+
 ## Tests summary
 $test_summary
 """)
@@ -93,10 +98,25 @@ def _build_test_summary(results: list[TestResult]) -> str:
     return "\n\n".join(parts)
 
 
-def write_report(results: list[TestResult] | None = None, elapsed: int = 0):
+def _format_skipped_optional_tests(skipped_tests: list[str]) -> str:
+    if not skipped_tests:
+        return "No optional scenarios skipped."
+    return "Skipped optional scenarios:\n" + "\n".join(
+        f"- `{test_name}`" for test_name in skipped_tests
+    )
+
+
+def write_report(
+    results: list[TestResult] | None = None,
+    elapsed: int = 0,
+    selection: str = "core",
+    skipped_tests: list[str] | None = None,
+):
     """Write a markdown report to REPORT_MD. Returns path written."""
     if results is None:
         results = []
+    if skipped_tests is None:
+        skipped_tests = []
     total = len(results)
     passed = sum(1 for r in results if r.is_passed)
     content = _REPORT_TEMPLATE.substitute(
@@ -108,6 +128,8 @@ def write_report(results: list[TestResult] | None = None, elapsed: int = 0):
         ci_run_link=_build_ci_run_link(),
         version_info=f"```\n{get_version_info()}\n```",
         dependency_table=format_markdown_table(),
+        scenario_selection=selection,
+        skipped_optional_tests=_format_skipped_optional_tests(skipped_tests),
         test_summary=_build_test_summary(results),
     )
     with open(REPORT_MD, "w") as fh:
